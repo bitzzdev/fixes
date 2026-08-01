@@ -6,7 +6,7 @@ JAR_SOURCE="$HOME/Downloads/LegacyLauncher.jar"
 ICON_SOURCE="$HOME/Downloads/mc.png"
 
 INSTALL_DIR="/opt/legacy-launcher"
-JAR_DEST="$INSTALL_DIR/LegacyLaucher.jar"
+JAR_DEST="$INSTALL_DIR/LegacyLauncher.jar"
 ICON_DEST="$INSTALL_DIR/mc.png"
 DESKTOP_FILE="/usr/share/applications/legacy-launcher.desktop"
 
