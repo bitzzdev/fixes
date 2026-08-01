@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="Legacy Launcher"
-JAR_SOURCE="$HOME/Downloads/LegacyLaucher.jar"
+JAR_SOURCE="$HOME/Downloads/LegacyLauncher.jar"
 ICON_SOURCE="$HOME/Downloads/mc.png"
 
 INSTALL_DIR="/opt/legacy-launcher"
