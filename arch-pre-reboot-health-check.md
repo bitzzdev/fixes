@@ -1,8 +1,20 @@
-# Arch Linux Pre-Reboot System Health Check
+# Arch Linux Post-Update `/boot` Health Check
 
-Use these commands after `pacman -Syu`, especially after a kernel update or an interrupted network connection.
+A focused check for the main problem this system can encounter after an interrupted or low-internet `pacman -Syu`, especially when a kernel update is involved.
 
-The checks verify the root filesystem, `/boot`, installed packages, kernel, microcode, initramfs, UKI, boot configuration, failed systemd services, and current boot errors.
+It checks only the boot-critical pieces:
+
+- `/boot` is mounted
+- `/boot` is the expected VFAT filesystem
+- `vmlinuz-linux` exists and is not suspiciously small
+- the Arch Unified Kernel Image exists and is not suspiciously small
+- the UKI is recognized as an EFI executable
+- AMD microcode exists when `amd-ucode` is installed
+- the installed `linux` package has no missing files
+
+It intentionally does not fail because of unrelated Wi-Fi, firmware, D-Bus, notification daemon, or journal warnings.
+
+The commands use `sudo` when reading `/boot` because this system's `/boot` permissions prevent the normal user from reading those files directly.
 
 ## Bash
 
@@ -14,40 +26,37 @@ echo
 
 FAILED=0
 
-echo ">>> Checking /boot mount"
+echo ">>> /boot mount"
 
 if mountpoint -q /boot; then
     echo "[OK] /boot is mounted"
-    findmnt /boot
 else
     echo "[FAIL] /boot is NOT mounted"
     FAILED=1
 fi
 
 echo
-echo ">>> Checking /boot filesystem"
+echo ">>> /boot filesystem"
 
-BOOT_FS=$(findmnt -n -o FSTYPE /boot 2>/dev/null || true)
+BOOT_FS=$(findmnt -n -o FSTYPE /boot 2>/dev/null)
 
-if [ "$BOOT_FS" = "vfat" ] || [ "$BOOT_FS" = "fat" ] || [ "$BOOT_FS" = "msdos" ]; then
-    echo "[OK] /boot filesystem: $BOOT_FS"
-elif [ -n "$BOOT_FS" ]; then
-    echo "[WARN] /boot filesystem is $BOOT_FS"
+if [ "$BOOT_FS" = "vfat" ]; then
+    echo "[OK] /boot is VFAT"
 else
-    echo "[FAIL] Unable to determine /boot filesystem"
+    echo "[FAIL] /boot filesystem could not be verified as VFAT"
     FAILED=1
 fi
 
 echo
-echo ">>> Checking kernel"
+echo ">>> Kernel"
 
-if [ -s /boot/vmlinuz-linux ]; then
-    SIZE=$(stat -c '%s' /boot/vmlinuz-linux)
+if sudo test -s /boot/vmlinuz-linux; then
+    SIZE=$(sudo stat -c '%s' /boot/vmlinuz-linux)
 
     if [ "$SIZE" -gt 1000000 ]; then
-        echo "[OK] /boot/vmlinuz-linux exists: $((SIZE / 1024 / 1024)) MB"
+        echo "[OK] vmlinuz-linux exists: $((SIZE / 1024 / 1024)) MB"
     else
-        echo "[FAIL] /boot/vmlinuz-linux is suspiciously small"
+        echo "[FAIL] vmlinuz-linux is suspiciously small"
         FAILED=1
     fi
 else
@@ -56,30 +65,44 @@ else
 fi
 
 echo
-echo ">>> Checking Unified Kernel Image"
+echo ">>> Unified Kernel Image"
 
 UKI="/boot/EFI/Linux/arch-linux.efi"
 
-if [ -s "$UKI" ]; then
-    SIZE=$(stat -c '%s' "$UKI")
+if sudo test -s "$UKI"; then
+    SIZE=$(sudo stat -c '%s' "$UKI")
 
-    if [ "$SIZE" -gt 1000000 ] && file "$UKI" | grep -qiE 'PE32\+.*EFI|EFI.*application'; then
-        echo "[OK] Arch UKI exists and is a valid EFI executable"
-        echo "     Size: $((SIZE / 1024 / 1024)) MB"
+    if [ "$SIZE" -gt 1000000 ]; then
+        echo "[OK] arch-linux.efi exists: $((SIZE / 1024 / 1024)) MB"
     else
-        echo "[FAIL] UKI exists but appears invalid or incomplete"
+        echo "[FAIL] arch-linux.efi is suspiciously small"
         FAILED=1
     fi
 else
-    echo "[FAIL] $UKI is missing"
+    echo "[FAIL] /boot/EFI/Linux/arch-linux.efi is missing"
     FAILED=1
 fi
 
 echo
-echo ">>> Checking AMD microcode"
+echo ">>> UKI format"
+
+if sudo test -s "$UKI"; then
+    UKI_TYPE=$(sudo file "$UKI")
+
+    if echo "$UKI_TYPE" | grep -qiE 'PE32\+.*EFI|EFI.*application'; then
+        echo "[OK] UKI is a valid EFI executable"
+    else
+        echo "[FAIL] UKI is not recognized as an EFI executable"
+        echo "$UKI_TYPE"
+        FAILED=1
+    fi
+fi
+
+echo
+echo ">>> AMD microcode"
 
 if pacman -Q amd-ucode >/dev/null 2>&1; then
-    if [ -s /boot/amd-ucode.img ]; then
+    if sudo test -s /boot/amd-ucode.img; then
         echo "[OK] AMD microcode exists"
     else
         echo "[FAIL] /boot/amd-ucode.img is missing"
@@ -90,7 +113,7 @@ else
 fi
 
 echo
-echo ">>> Checking kernel package integrity"
+echo ">>> Linux package integrity"
 
 KERNEL_CHECK=$(pacman -Qk linux 2>&1)
 
@@ -99,19 +122,7 @@ if echo "$KERNEL_CHECK" | grep -qE '[1-9][0-9]* missing files'; then
     echo "$KERNEL_CHECK" | grep 'missing files'
     FAILED=1
 else
-    echo "[OK] Linux package has no missing files"
-fi
-
-echo
-echo ">>> Checking UKI through boot configuration"
-
-BOOTCTL=$(bootctl status 2>&1 || true)
-
-if echo "$BOOTCTL" | grep -q "arch-linux.efi"; then
-    echo "[OK] Boot configuration recognizes arch-linux.efi"
-else
-    echo "[FAIL] Boot configuration does not recognize arch-linux.efi"
-    FAILED=1
+    echo "[OK] Linux package files are intact"
 fi
 
 echo
@@ -120,13 +131,13 @@ echo "========================================"
 if [ "$FAILED" -eq 0 ]; then
     echo "[PASS] /boot CHECK PASSED"
     echo
-    echo "No /boot/kernel/UKI problems were detected."
-    echo "The system appears safe to reboot."
+    echo "Kernel and boot files look healthy."
+    echo "Safe to reboot."
 else
     echo "[FAIL] /boot CHECK FAILED"
     echo
-    echo "DO NOT REBOOT YET."
-    echo "A possible /boot or kernel update problem was detected."
+    echo "DO NOT reboot yet."
+    echo "Investigate the [FAIL] item above."
 fi
 
 echo "========================================"
@@ -142,41 +153,38 @@ echo
 
 set FAILED 0
 
-echo ">>> Checking /boot mount"
+echo ">>> /boot mount"
 
 if mountpoint -q /boot
     echo "[OK] /boot is mounted"
-    findmnt /boot
 else
     echo "[FAIL] /boot is NOT mounted"
     set FAILED 1
 end
 
 echo
-echo ">>> Checking /boot filesystem"
+echo ">>> /boot filesystem"
 
 set BOOT_FS (findmnt -n -o FSTYPE /boot 2>/dev/null)
 
-if test "$BOOT_FS" = "vfat"; or test "$BOOT_FS" = "fat"; or test "$BOOT_FS" = "msdos"
-    echo "[OK] /boot filesystem: $BOOT_FS"
-else if test -n "$BOOT_FS"
-    echo "[WARN] /boot filesystem is $BOOT_FS"
+if test "$BOOT_FS" = "vfat"
+    echo "[OK] /boot is VFAT"
 else
-    echo "[FAIL] Unable to determine /boot filesystem"
+    echo "[FAIL] /boot filesystem could not be verified as VFAT"
     set FAILED 1
 end
 
 echo
-echo ">>> Checking kernel"
+echo ">>> Kernel"
 
-if test -s /boot/vmlinuz-linux
-    set SIZE (stat -c '%s' /boot/vmlinuz-linux)
+if sudo test -s /boot/vmlinuz-linux
+    set SIZE (sudo stat -c '%s' /boot/vmlinuz-linux)
 
     if test $SIZE -gt 1000000
         set MB (math "floor($SIZE / 1024 / 1024)")
-        echo "[OK] /boot/vmlinuz-linux exists: $MB MB"
+        echo "[OK] vmlinuz-linux exists: $MB MB"
     else
-        echo "[FAIL] /boot/vmlinuz-linux is suspiciously small"
+        echo "[FAIL] vmlinuz-linux is suspiciously small"
         set FAILED 1
     end
 else
@@ -185,31 +193,45 @@ else
 end
 
 echo
-echo ">>> Checking Unified Kernel Image"
+echo ">>> Unified Kernel Image"
 
 set UKI /boot/EFI/Linux/arch-linux.efi
 
-if test -s $UKI
-    set SIZE (stat -c '%s' $UKI)
+if sudo test -s $UKI
+    set SIZE (sudo stat -c '%s' $UKI)
 
-    if test $SIZE -gt 1000000; and file $UKI | grep -qiE 'PE32\+.*EFI|EFI.*application'
+    if test $SIZE -gt 1000000
         set MB (math "floor($SIZE / 1024 / 1024)")
-        echo "[OK] Arch UKI exists and is a valid EFI executable"
-        echo "     Size: $MB MB"
+        echo "[OK] arch-linux.efi exists: $MB MB"
     else
-        echo "[FAIL] UKI exists but appears invalid or incomplete"
+        echo "[FAIL] arch-linux.efi is suspiciously small"
         set FAILED 1
     end
 else
-    echo "[FAIL] $UKI is missing"
+    echo "[FAIL] /boot/EFI/Linux/arch-linux.efi is missing"
     set FAILED 1
 end
 
 echo
-echo ">>> Checking AMD microcode"
+echo ">>> UKI format"
+
+if sudo test -s $UKI
+    set UKI_TYPE (sudo file $UKI)
+
+    if string match -rq 'PE32\+.*EFI|EFI.*application' -- $UKI_TYPE
+        echo "[OK] UKI is a valid EFI executable"
+    else
+        echo "[FAIL] UKI is not recognized as an EFI executable"
+        echo "$UKI_TYPE"
+        set FAILED 1
+    end
+end
+
+echo
+echo ">>> AMD microcode"
 
 if pacman -Q amd-ucode >/dev/null 2>&1
-    if test -s /boot/amd-ucode.img
+    if sudo test -s /boot/amd-ucode.img
         echo "[OK] AMD microcode exists"
     else
         echo "[FAIL] /boot/amd-ucode.img is missing"
@@ -220,7 +242,7 @@ else
 end
 
 echo
-echo ">>> Checking kernel package integrity"
+echo ">>> Linux package integrity"
 
 set KERNEL_CHECK (pacman -Qk linux 2>&1)
 
@@ -229,19 +251,7 @@ if printf '%s\n' $KERNEL_CHECK | grep -qE '[1-9][0-9]* missing files'
     printf '%s\n' $KERNEL_CHECK | grep 'missing files'
     set FAILED 1
 else
-    echo "[OK] Linux package has no missing files"
-end
-
-echo
-echo ">>> Checking UKI through boot configuration"
-
-set BOOTCTL (bootctl status 2>&1)
-
-if printf '%s\n' $BOOTCTL | grep -q "arch-linux.efi"
-    echo "[OK] Boot configuration recognizes arch-linux.efi"
-else
-    echo "[FAIL] Boot configuration does not recognize arch-linux.efi"
-    set FAILED 1
+    echo "[OK] Linux package files are intact"
 end
 
 echo
@@ -250,35 +260,29 @@ echo "========================================"
 if test $FAILED -eq 0
     echo "[PASS] /boot CHECK PASSED"
     echo
-    echo "No /boot/kernel/UKI problems were detected."
-    echo "The system appears safe to reboot."
+    echo "Kernel and boot files look healthy."
+    echo "Safe to reboot."
 else
     echo "[FAIL] /boot CHECK FAILED"
     echo
-    echo "DO NOT REBOOT YET."
-    echo "A possible /boot or kernel update problem was detected."
+    echo "DO NOT reboot yet."
+    echo "Investigate the [FAIL] item above."
 end
 
 echo "========================================"
 ```
 
-## Result
+## What a successful check means
 
-A successful check ends with:
-
-```text
-SYSTEM CHECK PASSED
-
-No critical problems were detected.
-The system appears safe to reboot.
-```
-
-If it ends with:
+A successful result should end with:
 
 ```text
-SYSTEM CHECK FAILED
+[PASS] /boot CHECK PASSED
 
-Do NOT reboot yet.
+Kernel and boot files look healthy.
+Safe to reboot.
 ```
 
-do not reboot until the `[FAIL]` item has been investigated.
+If it reports `[FAIL]`, the specific check immediately above the final result identifies what needs attention.
+
+This check does not use `bootctl status` as a failure condition because this system uses GRUB 2.14 to load the Arch UKI. The `systemd-boot not installed in ESP` message from `bootctl` is therefore not a problem.
