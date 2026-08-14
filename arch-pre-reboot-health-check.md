@@ -9,191 +9,127 @@ The checks verify the root filesystem, `/boot`, installed packages, kernel, micr
 Copy and paste the entire block directly into Bash:
 
 ```bash
+echo "===== ARCH /BOOT POST-UPDATE CHECK ====="
+echo
+
 FAILED=0
 
-check() {
-    echo
-    echo ">>> $1"
-}
+echo ">>> Checking /boot mount"
 
-pass() {
-    echo "[OK] $1"
-}
-
-warn() {
-    echo "[WARN] $1"
-}
-
-fail() {
-    echo "[FAIL] $1"
-    FAILED=1
-}
-
-echo "========================================"
-echo " Arch Linux Pre-Reboot Health Check"
-echo "========================================"
-
-check "Checking root filesystem"
-if findmnt -n / >/dev/null 2>&1; then
-    ROOT_FS=$(findmnt -n -o FSTYPE /)
-    ROOT_DEV=$(findmnt -n -o SOURCE /)
-    pass "Root mounted: $ROOT_DEV ($ROOT_FS)"
-else
-    fail "Root filesystem is not mounted"
-fi
-
-check "Checking /boot"
 if mountpoint -q /boot; then
-    BOOT_DEV=$(findmnt -n -o SOURCE /boot)
-    BOOT_FS=$(findmnt -n -o FSTYPE /boot)
-    pass "/boot mounted: $BOOT_DEV ($BOOT_FS)"
+    echo "[OK] /boot is mounted"
+    findmnt /boot
 else
-    fail "/boot is NOT mounted"
+    echo "[FAIL] /boot is NOT mounted"
+    FAILED=1
 fi
 
-check "Checking package update state"
-UPDATES=$(pacman -Qu 2>/dev/null || true)
-if [ -z "$UPDATES" ]; then
-    pass "No pending package updates"
+echo
+echo ">>> Checking /boot filesystem"
+
+BOOT_FS=$(findmnt -n -o FSTYPE /boot 2>/dev/null || true)
+
+if [ "$BOOT_FS" = "vfat" ] || [ "$BOOT_FS" = "fat" ] || [ "$BOOT_FS" = "msdos" ]; then
+    echo "[OK] /boot filesystem: $BOOT_FS"
+elif [ -n "$BOOT_FS" ]; then
+    echo "[WARN] /boot filesystem is $BOOT_FS"
 else
-    warn "Packages still have available updates:"
-    echo "$UPDATES"
+    echo "[FAIL] Unable to determine /boot filesystem"
+    FAILED=1
 fi
 
-check "Checking installed package files"
-QK_OUTPUT=$(sudo pacman -Qk 2>&1)
-if echo "$QK_OUTPUT" | grep -qE '[0-9]+ missing files'; then
-    fail "Some installed packages have missing files"
-    echo "$QK_OUTPUT" | grep -E 'missing files'
-else
-    pass "No missing package files detected"
-fi
+echo
+echo ">>> Checking kernel"
 
-check "Checking installed kernel"
-KERNEL=$(pacman -Q linux 2>/dev/null || true)
-if [ -n "$KERNEL" ]; then
-    pass "Installed kernel: $KERNEL"
-else
-    fail "linux package is not installed"
-fi
-
-check "Checking kernel files in /boot"
-if [ -f /boot/vmlinuz-linux ]; then
+if [ -s /boot/vmlinuz-linux ]; then
     SIZE=$(stat -c '%s' /boot/vmlinuz-linux)
+
     if [ "$SIZE" -gt 1000000 ]; then
-        pass "vmlinuz-linux exists and is $((SIZE / 1024 / 1024)) MB"
+        echo "[OK] /boot/vmlinuz-linux exists: $((SIZE / 1024 / 1024)) MB"
     else
-        fail "vmlinuz-linux exists but is suspiciously small"
+        echo "[FAIL] /boot/vmlinuz-linux is suspiciously small"
+        FAILED=1
     fi
 else
-    fail "/boot/vmlinuz-linux is missing"
+    echo "[FAIL] /boot/vmlinuz-linux is missing"
+    FAILED=1
 fi
 
-check "Checking CPU microcode"
-if pacman -Q amd-ucode >/dev/null 2>&1; then
-    if [ -s /boot/amd-ucode.img ]; then
-        pass "AMD microcode present"
-    else
-        fail "amd-ucode is installed but /boot/amd-ucode.img is missing"
-    fi
-elif pacman -Q intel-ucode >/dev/null 2>&1; then
-    if [ -s /boot/intel-ucode.img ]; then
-        pass "Intel microcode present"
-    else
-        fail "intel-ucode is installed but /boot/intel-ucode.img is missing"
-    fi
-else
-    warn "No CPU microcode package detected"
-fi
+echo
+echo ">>> Checking Unified Kernel Image"
 
-check "Checking mkinitcpio"
-if command -v mkinitcpio >/dev/null 2>&1; then
-    pass "mkinitcpio is installed"
-else
-    fail "mkinitcpio is missing"
-fi
-
-check "Rebuilding initramfs and UKI"
-if sudo mkinitcpio -P; then
-    pass "initramfs/UKI generation completed successfully"
-else
-    fail "mkinitcpio failed"
-fi
-
-check "Checking Unified Kernel Image"
 UKI="/boot/EFI/Linux/arch-linux.efi"
 
-if [ -f "$UKI" ]; then
+if [ -s "$UKI" ]; then
     SIZE=$(stat -c '%s' "$UKI")
-    if [ "$SIZE" -gt 1000000 ]; then
-        if file "$UKI" | grep -qiE 'PE32\+.*EFI|EFI.*application'; then
-            pass "Valid UKI found: $((SIZE / 1024 / 1024)) MB"
-        else
-            warn "UKI exists but file does not look like a normal EFI executable"
-        fi
+
+    if [ "$SIZE" -gt 1000000 ] && file "$UKI" | grep -qiE 'PE32\+.*EFI|EFI.*application'; then
+        echo "[OK] Arch UKI exists and is a valid EFI executable"
+        echo "     Size: $((SIZE / 1024 / 1024)) MB"
     else
-        fail "UKI exists but is suspiciously small"
+        echo "[FAIL] UKI exists but appears invalid or incomplete"
+        FAILED=1
     fi
 else
-    fail "UKI missing: $UKI"
+    echo "[FAIL] $UKI is missing"
+    FAILED=1
 fi
 
-check "Checking boot configuration"
-if command -v bootctl >/dev/null 2>&1; then
-    BOOTCTL_OUTPUT=$(sudo bootctl status 2>&1 || true)
+echo
+echo ">>> Checking AMD microcode"
 
-    if echo "$BOOTCTL_OUTPUT" | grep -q "arch-linux.efi"; then
-        pass "Arch UKI is recognized by boot configuration"
+if pacman -Q amd-ucode >/dev/null 2>&1; then
+    if [ -s /boot/amd-ucode.img ]; then
+        echo "[OK] AMD microcode exists"
     else
-        warn "bootctl did not clearly report arch-linux.efi"
+        echo "[FAIL] /boot/amd-ucode.img is missing"
+        FAILED=1
     fi
-
-    echo "$BOOTCTL_OUTPUT" | grep -E \
-        'Current Boot Loader:|Product:|Default Boot Loader Entry:|title:|version:|source:|linux:|options:' \
-        || true
 else
-    warn "bootctl is not available"
+    echo "[INFO] amd-ucode is not installed"
 fi
 
-check "Checking failed systemd services"
-FAILED_SERVICES=$(systemctl --failed --no-legend 2>/dev/null || true)
+echo
+echo ">>> Checking kernel package integrity"
 
-if [ -z "$FAILED_SERVICES" ]; then
-    pass "No failed systemd services"
+KERNEL_CHECK=$(pacman -Qk linux 2>&1)
+
+if echo "$KERNEL_CHECK" | grep -qE '[1-9][0-9]* missing files'; then
+    echo "[FAIL] Linux package has missing files"
+    echo "$KERNEL_CHECK" | grep 'missing files'
+    FAILED=1
 else
-    warn "Failed systemd services detected:"
-    echo "$FAILED_SERVICES"
+    echo "[OK] Linux package has no missing files"
 fi
 
-check "Checking current boot errors"
-ERRORS=$(sudo journalctl -b -p err..alert --no-pager 2>/dev/null || true)
+echo
+echo ">>> Checking UKI through boot configuration"
 
-if [ -z "$ERRORS" ]; then
-    pass "No error-level boot messages"
+BOOTCTL=$(bootctl status 2>&1 || true)
+
+if echo "$BOOTCTL" | grep -q "arch-linux.efi"; then
+    echo "[OK] Boot configuration recognizes arch-linux.efi"
 else
-    warn "Error-level messages were found:"
-    echo "$ERRORS"
+    echo "[FAIL] Boot configuration does not recognize arch-linux.efi"
+    FAILED=1
 fi
 
 echo
 echo "========================================"
 
 if [ "$FAILED" -eq 0 ]; then
-    echo " SYSTEM CHECK PASSED"
-    echo "========================================"
+    echo "[PASS] /boot CHECK PASSED"
     echo
-    echo "No critical problems were detected."
+    echo "No /boot/kernel/UKI problems were detected."
     echo "The system appears safe to reboot."
-    echo
-    echo "Run:"
-    echo "  sudo reboot"
 else
-    echo " SYSTEM CHECK FAILED"
-    echo "========================================"
+    echo "[FAIL] /boot CHECK FAILED"
     echo
-    echo "Do NOT reboot yet."
-    echo "Fix the [FAIL] items above first."
+    echo "DO NOT REBOOT YET."
+    echo "A possible /boot or kernel update problem was detected."
 fi
+
+echo "========================================"
 ```
 
 ## Fish
@@ -201,197 +137,129 @@ fi
 Copy and paste the entire block directly into Fish:
 
 ```fish
+echo "===== ARCH /BOOT POST-UPDATE CHECK ====="
+echo
+
 set FAILED 0
 
-function check
-    echo
-    echo ">>> $argv"
-end
+echo ">>> Checking /boot mount"
 
-function pass
-    echo "[OK] $argv"
-end
-
-function warn
-    echo "[WARN] $argv"
-end
-
-function fail
-    echo "[FAIL] $argv"
-    set -g FAILED 1
-end
-
-echo "========================================"
-echo " Arch Linux Pre-Reboot Health Check"
-echo "========================================"
-
-check "Checking root filesystem"
-if findmnt -n / >/dev/null 2>&1
-    set ROOT_FS (findmnt -n -o FSTYPE /)
-    set ROOT_DEV (findmnt -n -o SOURCE /)
-    pass "Root mounted: $ROOT_DEV ($ROOT_FS)"
-else
-    fail "Root filesystem is not mounted"
-end
-
-check "Checking /boot"
 if mountpoint -q /boot
-    set BOOT_DEV (findmnt -n -o SOURCE /boot)
-    set BOOT_FS (findmnt -n -o FSTYPE /boot)
-    pass "/boot mounted: $BOOT_DEV ($BOOT_FS)"
+    echo "[OK] /boot is mounted"
+    findmnt /boot
 else
-    fail "/boot is NOT mounted"
+    echo "[FAIL] /boot is NOT mounted"
+    set FAILED 1
 end
 
-check "Checking package update state"
-set UPDATES (pacman -Qu 2>/dev/null)
+echo
+echo ">>> Checking /boot filesystem"
 
-if test (count $UPDATES) -eq 0
-    pass "No pending package updates"
+set BOOT_FS (findmnt -n -o FSTYPE /boot 2>/dev/null)
+
+if test "$BOOT_FS" = "vfat"; or test "$BOOT_FS" = "fat"; or test "$BOOT_FS" = "msdos"
+    echo "[OK] /boot filesystem: $BOOT_FS"
+else if test -n "$BOOT_FS"
+    echo "[WARN] /boot filesystem is $BOOT_FS"
 else
-    warn "Packages still have available updates:"
-    printf '%s\n' $UPDATES
+    echo "[FAIL] Unable to determine /boot filesystem"
+    set FAILED 1
 end
 
-check "Checking installed package files"
-set QK_OUTPUT (sudo pacman -Qk 2>&1)
+echo
+echo ">>> Checking kernel"
 
-if printf '%s\n' $QK_OUTPUT | grep -qE '[0-9]+ missing files'
-    fail "Some installed packages have missing files"
-    printf '%s\n' $QK_OUTPUT | grep -E 'missing files'
-else
-    pass "No missing package files detected"
-end
-
-check "Checking installed kernel"
-set KERNEL (pacman -Q linux 2>/dev/null)
-
-if test (count $KERNEL) -gt 0
-    pass "Installed kernel: $KERNEL"
-else
-    fail "linux package is not installed"
-end
-
-check "Checking kernel files in /boot"
-if test -f /boot/vmlinuz-linux
+if test -s /boot/vmlinuz-linux
     set SIZE (stat -c '%s' /boot/vmlinuz-linux)
 
     if test $SIZE -gt 1000000
         set MB (math "floor($SIZE / 1024 / 1024)")
-        pass "vmlinuz-linux exists and is $MB MB"
+        echo "[OK] /boot/vmlinuz-linux exists: $MB MB"
     else
-        fail "vmlinuz-linux exists but is suspiciously small"
+        echo "[FAIL] /boot/vmlinuz-linux is suspiciously small"
+        set FAILED 1
     end
 else
-    fail "/boot/vmlinuz-linux is missing"
+    echo "[FAIL] /boot/vmlinuz-linux is missing"
+    set FAILED 1
 end
 
-check "Checking CPU microcode"
-if pacman -Q amd-ucode >/dev/null 2>&1
-    if test -s /boot/amd-ucode.img
-        pass "AMD microcode present"
-    else
-        fail "amd-ucode is installed but /boot/amd-ucode.img is missing"
-    end
-else if pacman -Q intel-ucode >/dev/null 2>&1
-    if test -s /boot/intel-ucode.img
-        pass "Intel microcode present"
-    else
-        fail "intel-ucode is installed but /boot/intel-ucode.img is missing"
-    end
-else
-    warn "No CPU microcode package detected"
-end
+echo
+echo ">>> Checking Unified Kernel Image"
 
-check "Checking mkinitcpio"
-if command -v mkinitcpio >/dev/null 2>&1
-    pass "mkinitcpio is installed"
-else
-    fail "mkinitcpio is missing"
-end
-
-check "Rebuilding initramfs and UKI"
-if sudo mkinitcpio -P
-    pass "initramfs/UKI generation completed successfully"
-else
-    fail "mkinitcpio failed"
-end
-
-check "Checking Unified Kernel Image"
 set UKI /boot/EFI/Linux/arch-linux.efi
 
-if test -f $UKI
+if test -s $UKI
     set SIZE (stat -c '%s' $UKI)
 
-    if test $SIZE -gt 1000000
-        if file $UKI | grep -qiE 'PE32\+.*EFI|EFI.*application'
-            set MB (math "floor($SIZE / 1024 / 1024)")
-            pass "Valid UKI found: $MB MB"
-        else
-            warn "UKI exists but file does not look like a normal EFI executable"
-        end
+    if test $SIZE -gt 1000000; and file $UKI | grep -qiE 'PE32\+.*EFI|EFI.*application'
+        set MB (math "floor($SIZE / 1024 / 1024)")
+        echo "[OK] Arch UKI exists and is a valid EFI executable"
+        echo "     Size: $MB MB"
     else
-        fail "UKI exists but is suspiciously small"
+        echo "[FAIL] UKI exists but appears invalid or incomplete"
+        set FAILED 1
     end
 else
-    fail "UKI missing: $UKI"
+    echo "[FAIL] $UKI is missing"
+    set FAILED 1
 end
 
-check "Checking boot configuration"
-if command -v bootctl >/dev/null 2>&1
-    set BOOTCTL_OUTPUT (sudo bootctl status 2>&1)
+echo
+echo ">>> Checking AMD microcode"
 
-    if printf '%s\n' $BOOTCTL_OUTPUT | grep -q "arch-linux.efi"
-        pass "Arch UKI is recognized by boot configuration"
+if pacman -Q amd-ucode >/dev/null 2>&1
+    if test -s /boot/amd-ucode.img
+        echo "[OK] AMD microcode exists"
     else
-        warn "bootctl did not clearly report arch-linux.efi"
+        echo "[FAIL] /boot/amd-ucode.img is missing"
+        set FAILED 1
     end
-
-    printf '%s\n' $BOOTCTL_OUTPUT | grep -E \
-        'Current Boot Loader:|Product:|Default Boot Loader Entry:|title:|version:|source:|linux:|options:'
 else
-    warn "bootctl is not available"
+    echo "[INFO] amd-ucode is not installed"
 end
 
-check "Checking failed systemd services"
-set FAILED_SERVICES (systemctl --failed --no-legend 2>/dev/null)
+echo
+echo ">>> Checking kernel package integrity"
 
-if test (count $FAILED_SERVICES) -eq 0
-    pass "No failed systemd services"
+set KERNEL_CHECK (pacman -Qk linux 2>&1)
+
+if printf '%s\n' $KERNEL_CHECK | grep -qE '[1-9][0-9]* missing files'
+    echo "[FAIL] Linux package has missing files"
+    printf '%s\n' $KERNEL_CHECK | grep 'missing files'
+    set FAILED 1
 else
-    warn "Failed systemd services detected:"
-    printf '%s\n' $FAILED_SERVICES
+    echo "[OK] Linux package has no missing files"
 end
 
-check "Checking current boot errors"
-set ERRORS (sudo journalctl -b -p err..alert --no-pager 2>/dev/null)
+echo
+echo ">>> Checking UKI through boot configuration"
 
-if test (count $ERRORS) -eq 0
-    pass "No error-level boot messages"
+set BOOTCTL (bootctl status 2>&1)
+
+if printf '%s\n' $BOOTCTL | grep -q "arch-linux.efi"
+    echo "[OK] Boot configuration recognizes arch-linux.efi"
 else
-    warn "Error-level messages were found:"
-    printf '%s\n' $ERRORS
+    echo "[FAIL] Boot configuration does not recognize arch-linux.efi"
+    set FAILED 1
 end
 
 echo
 echo "========================================"
 
 if test $FAILED -eq 0
-    echo " SYSTEM CHECK PASSED"
-    echo "========================================"
+    echo "[PASS] /boot CHECK PASSED"
     echo
-    echo "No critical problems were detected."
+    echo "No /boot/kernel/UKI problems were detected."
     echo "The system appears safe to reboot."
-    echo
-    echo "Run:"
-    echo "  sudo reboot"
 else
-    echo " SYSTEM CHECK FAILED"
-    echo "========================================"
+    echo "[FAIL] /boot CHECK FAILED"
     echo
-    echo "Do NOT reboot yet."
-    echo "Fix the [FAIL] items above first."
+    echo "DO NOT REBOOT YET."
+    echo "A possible /boot or kernel update problem was detected."
 end
+
+echo "========================================"
 ```
 
 ## Result
