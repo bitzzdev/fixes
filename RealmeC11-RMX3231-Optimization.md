@@ -560,3 +560,45 @@ These are cumulative counters, not rates. Their absolute magnitudes cannot be us
 5. No LMKD properties, zRAM settings, swap settings, VM tunables, or kernel parameters were modified.
 
 **Next action:** Complete a short controlled memory-pressure check with a fresh baseline, then a timed follow-up while performing a consistent everyday workload. Record MemAvailable, SwapFree, `pswpin`/`pswpout`, reclaim/allocstall deltas, and whether recently used apps are unexpectedly killed or need to reload. Do not weaken LMKD or change zRAM policy to keep more apps resident; that could make a 2 GB device less stable.
+
+
+### Stage 2 follow-up: 90-second normal-use memory test
+
+**Date:** 30 October 2026, 12:05:07–12:06:37 IST  
+**Method:** Read-only memory snapshots and Android event-log review before and after approximately 90 seconds of ordinary app switching.
+
+#### Memory snapshot
+
+| Metric | Baseline | Follow-up | Change |
+|---|---:|---:|---:|
+| MemFree | 36,328 KB | 43,780 KB | +7,452 KB |
+| MemAvailable | 821,456 KB | 592,340 KB | -229,116 KB |
+| SwapTotal | 1,435,600 KB | 1,435,600 KB | 0 |
+| SwapFree | 685,460 KB | 385,908 KB | -299,552 KB |
+| AnonPages | 314,872 KB | 314,524 KB | -348 KB |
+
+MemAvailable fell by approximately 223.7 MiB and SwapFree by approximately 292.5 MiB during the interval, while AnonPages was almost unchanged. This does not show that 292.5 MiB of new application data was swapped out. The relationship between the reported swap-free change and actual swap I/O remains unresolved; the expected `/proc/vmstat` lines were not present in the pasted output for this test, so no timed swap-in/out or reclaim-counter delta can be calculated from it.
+
+#### Process-kill events
+
+The baseline event-log excerpt already contained vendor `rampolicy` kills immediately before the test, including Google background processes, Google Play services, HeyTap and Spreadtrum processes. Brave and Gmail also had separate `remove task` kill records.
+
+During the 90-second interval, the follow-up event log showed:
+
+- Android removed empty cached Google processes.
+- At approximately 12:05:42, LMKD emitted five `killinfo` records. Matching process-death records included `android.process.media`, `com.google.android.permissioncontroller`, `com.facebook.services`, `com.github.android`, and `com.openai.chatgpt`.
+- At approximately 12:06:13–12:06:32, further vendor `rampolicy` kills affected HeyTap, Spreadtrum, Facebook App Manager, Google extension services, TalkBack, Flipkart, Google background processes and other vendor processes.
+- A further LMKD batch at approximately 12:06:17 had matching process-death records for Facebook System, Android Contacts/People (`android.process.acore`) and Gmail.
+
+This confirms that process reclamation continued during the normal-use test. The event records distinguish LMKD `killinfo` batches from ActivityManager `rampolicy` and `empty #4` kills; these mechanisms should not be treated as identical.
+
+#### Interpretation and limitations
+
+1. The device reclaimed multiple cached/background processes during ordinary use, including some app processes. This can cause an app to recreate its process or reload when reopened.
+2. The test output does not state exactly which apps were opened or whether their screens visibly reloaded, so the user-visible impact is not yet measured.
+3. MemAvailable decreased materially, but remained about 578 MiB at the end of the sample.
+4. SwapFree decreased materially while AnonPages stayed nearly flat. Because the timed VM counters were absent from the pasted output, this sample cannot establish the cause or amount of swap traffic.
+5. The repeated vendor `rampolicy` kills indicate an additional vendor process-management policy is active alongside LMKD. The exact policy implementation and thresholds have not been established.
+6. No LMKD, rampolicy, zRAM, swap, or VM settings were changed.
+
+**Next action:** Identify which apps were deliberately used during the 90-second test and whether they reloaded when revisited. Then collect a clean short sample that explicitly prints `/proc/vmstat` before and after, alongside MemAvailable, SwapFree, AnonPages, and recent kill events. Do not disable rampolicy or weaken LMKD based on these observations alone.
