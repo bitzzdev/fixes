@@ -332,7 +332,7 @@ The next phase remains read-only until each subsystem is understood. The immedia
 | 0 | Device and access baseline | Complete |
 | 1 | Kernel and OS inventory | Complete; 30 Oct 2026 |
 | 2 | Kernel configuration, memory pressure, zRAM/swap | In progress; read-only diagnostics prepared |
-| 3 | CPU scheduler and cpufreq behavior | Pending |
+| 3 | CPU scheduler and cpufreq behavior | Baseline complete; no tuning justified |
 | 4 | Storage I/O scheduler and latency | Pending |
 | 5 | Thermal behavior under a repeatable workload | Pending |
 | 6 | Display/compositor frame pacing | Pending |
@@ -669,7 +669,7 @@ The usage and residency values returned by sysfs are cumulative counters. They c
 4. Cumulative frequency and idle-state counters need interval deltas to show actual behavior during a controlled sample.
 5. No scheduler, governor, CPU frequency, or idle-state settings were changed.
 
-**Next diagnostic:** Take two short-interval snapshots of each policy's `time_in_state`, each CPU's `cpuidle/state*/time`, and the reported current frequency. Compare counter deltas rather than relying on a single frequency read. Keep the device screen on and otherwise idle. Do not force a frequency or change governors.
+**Next diagnostic:** Proceed to the read-only storage I/O baseline. Do not force a frequency or change governors.
 
 
 ### Stage 3 follow-up: corrected 20-second CPU frequency-residency sample
