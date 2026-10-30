@@ -447,3 +447,34 @@ RSS includes shared pages and is not equivalent to private memory use. This is a
 6. No memory, swap, zRAM, LMK, or kernel settings were changed.
 
 **Next action:** Repeat the selected VM counters and meminfo after a short interval, and inspect available Android lmkd/kernel log evidence if readable. Do not tune zRAM or memory policy until this is understood.
+
+
+### Stage 2 follow-up: repeat memory counters and OOM evidence
+
+**Time:** 30 October 2026, 11:59:56–12:00:17 IST  
+**Method:** Two read-only samples 20 seconds apart, plus log and service checks.
+
+| Metric | Sample 1 | Sample 2 | Change |
+|---|---:|---:|---:|
+| MemFree | 37,380 KB | 37,884 KB | +504 KB |
+| MemAvailable | 646,308 KB | 628,612 KB | -17,696 KB |
+| SwapTotal | 1,435,600 KB | 1,435,600 KB | 0 |
+| SwapFree | 696,652 KB | 682,452 KB | -14,200 KB |
+| AnonPages | 429,936 KB | 413,300 KB | -16,636 KB |
+| workingset_refault | 16,630 | 16,630 | 0 |
+| pswpin | 12,800 | 12,800 | 0 |
+| pswpout | 1,024 | 1,024 | 0 |
+| allocstall_dma | 299,910,919 | 299,930,198 | +19,279 |
+| allocstall_normal | 1,724,389,567 | 1,724,459,907 | +70,340 |
+| pgsteal_kswapd | 369,448,065 | 369,468,195 | +20,130 |
+| pgsteal_direct | 228,149,785 | 228,165,012 | +15,227 |
+| pgscan_kswapd | 431 | 431 | 0 |
+| pgscan_direct | 795,709,897 | 795,735,146 | +25,249 |
+| pgscan_direct_throttle | 455,408,299 | 455,419,414 | +11,115 |
+| oom_kill | 334,640 | 334,649 | +9 |
+
+The available-memory reduction was about 17.3 MiB, and SwapFree fell about 13.9 MiB. However, the swap-in/out counters did not change, so this is not enough to attribute the SwapFree change to ordinary swap I/O.
+
+The reclaim and allocation-stall counters continued increasing rapidly. The `oom_kill` counter rose by nine, but the queried logcat buffers contained no matching `lmkd` or `lowmemorykiller` messages, and the queried kernel log search returned no OOM/killed-process messages. The Binder service-list query returned no service name matching LMK or memory.
+
+**Interpretation:** This is a repeatable counter anomaly that warrants checking process-exit records and the actual lmkd process. The counters alone do not identify which process was killed or establish user-visible memory pressure. No changes were made.
