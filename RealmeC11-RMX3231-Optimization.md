@@ -248,7 +248,7 @@ Instagram's two background AppOps restrictions remain active. Its process was su
 
 Gmail's high CPU reading was temporary. No persistent CPU overload, memory thrashing, or wake-lock problem has been established.
 
-**Next priority:** Inspect the kernel configuration and obtain readable memory/zRAM and storage diagnostics before proposing any OS-level changes.
+**Next priority:** Repeat the unusual memory-counter sample before proposing any OS-level changes.
 
 
 ## 10. OS and kernel investigation
@@ -353,3 +353,97 @@ The next diagnostic pass is designed to distinguish configuration from live beha
 - Re-check `/proc/swaps`; if it remains denied, record that limitation rather than inferring swap state.
 
 No changes are authorized by this diagnostic stage. In particular, do not change `swappiness`, zRAM size/algorithm, LMK settings, or storage queue parameters based on configuration flags alone.
+
+
+### Stage 2 results: kernel configuration and memory observations
+
+**Date:** 30 October 2026  
+**Method:** Read-only ADB diagnostics and host-side inspection of the pulled kernel config.
+
+#### Kernel configuration flags
+
+The pulled `/proc/config.gz` confirms these options are enabled:
+
+| Option | Result |
+|---|---|
+| `CONFIG_SWAP` | `y` |
+| `CONFIG_PSI` | `y` |
+| `CONFIG_MEMCG` | `y` |
+| `CONFIG_VM_EVENT_COUNTERS` | `y` |
+| `CONFIG_COMPACTION` | `y` |
+| `CONFIG_MIGRATION` | `y` |
+| `CONFIG_ZSMALLOC` | `y` |
+| `CONFIG_ZRAM` | `y` |
+| `CONFIG_ZRAM_WRITEBACK` | `y` |
+
+These flags confirm kernel build support only. They do not reveal the live zRAM configuration, compression algorithm, backing device, or writeback state.
+
+#### Runtime access limitations
+
+- `/proc/swaps` returned **Permission denied**.
+- `/sys/block/zram0` and its `disksize`, `comp_algorithm`, `mm_stat`, `stat`, and `writeback` attributes all returned **Permission denied**.
+- `/proc/pressure/memory` returned **Permission denied**. CPU and I/O pressure entries were also listed but inaccessible.
+- No protected interface was written to.
+
+#### Memory snapshots
+
+| Metric | Snapshot 1 | Snapshot 2, 10 seconds later |
+|---|---:|---:|
+| MemTotal | 1,914,140 KB | 1,914,140 KB |
+| MemFree | 37,196 KB | 35,016 KB |
+| MemAvailable | 653,216 KB | 648,648 KB |
+| Cached | 657,832 KB | 656,556 KB |
+| SwapTotal | 1,435,600 KB | 1,435,600 KB |
+| SwapFree | 481,040 KB | 451,256 KB |
+| AnonPages | 326,460 KB | 304,252 KB |
+
+MemAvailable changed by approximately -4.5 MB during the interval. Reported SwapFree decreased by approximately 29.1 MB, but the `pswpin` and `pswpout` counters did not change. This short sample does not establish sustained swap pressure; the mismatch needs another sample rather than an assumption.
+
+#### VM counter deltas over 10 seconds
+
+| Counter | Snapshot 1 | Snapshot 2 | Delta |
+|---|---:|---:|---:|
+| workingset_refault | 17,006 | 17,037 | +31 |
+| pswpin | 12,800 | 12,800 | 0 |
+| pswpout | 1,024 | 1,024 | 0 |
+| allocstall_dma | 299,868,439 | 299,879,352 | +10,913 |
+| allocstall_normal | 1,723,955,770 | 1,723,991,241 | +35,471 |
+| allocstall_movable | 0 | 0 | 0 |
+| pgsteal_kswapd | 369,221,002 | 369,232,318 | +11,316 |
+| pgsteal_direct | 228,093,001 | 228,096,540 | +3,539 |
+| pgscan_kswapd | 431 | 431 | 0 |
+| pgscan_direct | 795,656,890 | 795,664,689 | +7,799 |
+| pgscan_direct_throttle | 455,370,066 | 455,376,025 | +5,959 |
+| oom_kill | 334,611 | 334,617 | +6 |
+
+The reclaim/allocstall deltas are unusually large, and `oom_kill` increased by six. However, MemAvailable remained around 649–653 MB and swap I/O counters did not change. Vendor-kernel counter behavior or semantics may differ; one short sample is not enough to conclude that the phone is actively suffering OOM events or user-visible memory thrashing. Repeat the counters and compare them with available lmkd/kernel logs before diagnosing.
+
+#### Android process memory snapshot
+
+Largest RSS entries in the captured `dumpsys meminfo` summary:
+
+| Process | RSS |
+|---|---:|
+| ChatGPT | 219,388 KB |
+| X | 185,936 KB |
+| system | 182,824 KB |
+| LinkedIn | 167,000 KB |
+| Gmail | 165,872 KB |
+| Instagram | 146,324 KB |
+| Google Play services | 125,024 KB |
+| GitHub | 102,784 KB |
+| System UI | 96,396 KB |
+| Niagara Launcher | 86,892 KB |
+
+RSS includes shared pages and is not equivalent to private memory use. This is a single snapshot and does not identify an app that should be restricted. The command's broken-pipe message occurred because output was intentionally limited with `head -70`; it is not evidence of a device crash.
+
+#### Stage 2 conclusion
+
+1. The kernel has swap, zRAM, zsmalloc, zRAM writeback, PSI, memory-cgroup, compaction, migration, and VM-event-counter support compiled in.
+2. Live zRAM details, the swap table, and PSI readings remain inaccessible to the non-root ADB shell.
+3. MemAvailable remained around 649–653 MB during the short sample.
+4. SwapFree dropped by about 29 MB, but `pswpin` and `pswpout` did not change. This inconsistency needs verification.
+5. Reclaim/allocstall counters increased, and `oom_kill` rose by six. Treat this as an anomaly to validate, not a confirmed diagnosis.
+6. No memory, swap, zRAM, LMK, or kernel settings were changed.
+
+**Next action:** Repeat the selected VM counters and meminfo after a short interval, and inspect available Android lmkd/kernel log evidence if readable. Do not tune zRAM or memory policy until this is understood.
