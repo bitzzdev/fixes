@@ -124,6 +124,76 @@ Prioritize apps with unusually large user data or cache, not simply the largest 
 - Prefer moving backed-up photos/videos and removing unneeded app data over deleting Android components.
 - After cleanup, verify that the phone still boots, core apps work, media is intact, and the free-space figure remains stable after a reboot.
 
-## 9. Current state
 
-No storage files, app data, caches, or system components have been deleted or modified. The exact free-space baseline and per-app breakdown are still pending.
+## 10. Periodic cache trimming through ADB
+
+Android's Package Manager provides:
+
+```sh
+adb shell pm trim-caches 8G
+```
+
+This asks Android to remove cache files it considers disposable until the requested free-space target is reached. It is **not** a command to erase every app's cache unconditionally, and it does not clear app data, accounts, databases, or personal downloads. The operating system chooses which cache files to trim. The command may do nothing when free space is already above the target.
+
+The size suffix is binary: `8G` means 8 GiB. The target is a free-space goal, not the amount to delete. Choose a sensible low-water mark rather than an enormous value. Repeatedly forcing every cache to zero is counterproductive: apps may need to download or regenerate cached content, increasing data use, CPU work, battery consumption, and initial loading time.
+
+### Measure before and after
+
+```fish
+begin
+    echo "===== FREE SPACE BEFORE ====="
+    adb shell df -h /data /storage/emulated/0
+
+    echo
+    echo "===== PACKAGE MANAGER CACHE TRIM ====="
+    adb shell pm trim-caches 8G
+    echo "pm trim-caches exit status: $status"
+
+    echo
+    echo "===== FREE SPACE AFTER ====="
+    adb shell df -h /data /storage/emulated/0
+end 2>&1 | tee /tmp/rmx3231-cache-trim.txt
+
+if type -q wl-copy
+    wl-copy < /tmp/rmx3231-cache-trim.txt
+else if type -q xclip
+    xclip -selection clipboard -i /tmp/rmx3231-cache-trim.txt
+else if type -q xsel
+    xsel --clipboard --input < /tmp/rmx3231-cache-trim.txt
+else
+    echo "Clipboard utility missing."
+end
+```
+
+Run this once manually first to confirm that the Realme firmware permits the shell command and to observe its effect. A successful command may print no result; compare the before/after filesystem measurements instead. If the device rejects the command, do not substitute `pm clear` or bulk per-app data deletion.
+
+### What can be automated
+
+ADB commands execute on the phone when an authorised ADB connection exists. A non-root Android app or an ordinary on-device scheduled job cannot silently retain the ADB shell identity after the debugging session ends. For this non-root setup, the practical option is a scheduled task on the Arch computer:
+
+- Run a small script from a systemd user timer (or another host scheduler).
+- Check that the phone is connected and authorised before doing anything.
+- If no device is connected, exit without changing the phone.
+- If connected, record free space, run `pm trim-caches 8G`, then record free space again.
+- Keep a log and do not run `pm clear`, `rm -rf`, or app-specific data deletion.
+- Use a conservative cadence such as weekly, not every few hours. A free-space threshold means the command normally does nothing when the phone already has enough free space.
+
+A host timer cannot clean the phone while the phone is disconnected. It only runs when the Arch computer is awake and the ADB connection is available at the scheduled time. A more robust implementation can retry on a short cadence while connected, but should still enforce a minimum interval between successful trim attempts.
+
+### Current device context
+
+The owner reported that approximately 8.7 GB had been freed after the manual cleanup, and that Codespaces is the primary development environment. The Termux installation is therefore a candidate for a separate, careful reduction, but this cache-trimming procedure does not remove Termux packages or project files.
+
+Do not treat the earlier 3.85 GiB Media Provider data figure as cache. It was reported as app data with only about 0.2 MiB cache; `pm trim-caches` is not expected to reclaim that data. Do not clear Media Provider data.
+
+## 11. Progress log update
+
+| Step | Action | Result |
+|---|---|---|
+| 3 | Read-only per-package diskstats analysis | Media Provider module reported ~3,847 MiB data and ~0.2 MiB cache; Termux ~2,186 MiB data; Brave ~1,040 MiB data plus ~871 MiB cache; Instagram ~871 MiB data plus ~494 MiB cache |
+| 4 | Manual user cleanup | Owner reported approximately 8.7 GB freed; exact post-cleanup `df` measurement not yet captured |
+| 5 | ADB cache-trim capability documented | `pm trim-caches 8G` documented as a free-space target; manual device test and host-side schedule not yet performed |
+
+## 12. Current state
+
+No automated cache-trimming schedule has been installed yet. The owner-reported manual cleanup recovered approximately 8.7 GB. A one-time ADB cache-trim test and a host-side scheduled implementation remain pending. No Media Provider data has been cleared.
