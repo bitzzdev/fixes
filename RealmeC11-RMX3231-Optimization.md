@@ -670,3 +670,34 @@ The usage and residency values returned by sysfs are cumulative counters. They c
 5. No scheduler, governor, CPU frequency, or idle-state settings were changed.
 
 **Next diagnostic:** Take two short-interval snapshots of each policy's `time_in_state`, each CPU's `cpuidle/state*/time`, and the reported current frequency. Compare counter deltas rather than relying on a single frequency read. Keep the device screen on and otherwise idle. Do not force a frequency or change governors.
+
+
+### Stage 3 follow-up: corrected 20-second CPU frequency-residency sample
+
+**Date:** 30 October 2026  
+**Method:** Two read-only snapshots of both cpufreq policies, 20 seconds apart. The loop ran inside the phone's remote shell, correcting an earlier host-side loop that captured policy0 but attempted a nonexistent policy1 path and did not capture policy4.
+
+| Policy | CPUs | Governor | Current frequency at both endpoint reads |
+|---|---|---|---:|
+| policy0 | 0–3 | schedutil | 768 MHz |
+| policy4 | 4–7 | schedutil | 1.6 GHz |
+
+Raw `time_in_state` counter deltas during the interval:
+
+| Policy | Frequency | Delta |
+|---|---:|---:|
+| policy0 | 768 MHz | +1,617 |
+| policy0 | 884 MHz | 0 |
+| policy0 | 1.0 GHz | 0 |
+| policy0 | 1.1 GHz | 0 |
+| policy0 | 1.2 GHz | +400 |
+| policy4 | 768 MHz | +1,534 |
+| policy4 | 1.05 GHz | +2 |
+| policy4 | 1.225 GHz | 0 |
+| policy4 | 1.4 GHz | 0 |
+| policy4 | 1.5 GHz | 0 |
+| policy4 | 1.6 GHz | +483 |
+
+Both clusters remained on `schedutil`. The raw counters increased at both the lowest and highest listed frequencies on each cluster. The endpoint frequency values are point-in-time reads, not proof that either cluster stayed at that frequency throughout the interval. The counter units and vendor driver's exact accounting semantics have not been independently verified, so the deltas are recorded as raw values and are not converted into residency percentages or time units.
+
+**Conclusion:** This sample does not justify changing either governor, CPU frequency limits, or scheduler settings. No settings were changed. The CPU baseline is sufficient to proceed to the next read-only subsystem investigation.
