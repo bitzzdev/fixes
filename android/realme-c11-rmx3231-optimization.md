@@ -701,3 +701,19 @@ Raw `time_in_state` counter deltas during the interval:
 Both clusters remained on `schedutil`. The raw counters increased at both the lowest and highest listed frequencies on each cluster. The endpoint frequency values are point-in-time reads, not proof that either cluster stayed at that frequency throughout the interval. The counter units and vendor driver's exact accounting semantics have not been independently verified, so the deltas are recorded as raw values and are not converted into residency percentages or time units.
 
 **Conclusion:** This sample does not justify changing either governor, CPU frequency limits, or scheduler settings. No settings were changed. The CPU baseline is sufficient to proceed to the next read-only subsystem investigation.
+
+
+### Stage 4: storage inventory and cleanup planning
+
+**Date:** 30 October 2026  
+**Status:** Inventory pending; no storage changes made.
+
+The first storage diagnostic attempt failed because a shell loop containing fish's `end` keyword was passed to Android's `/system/bin/sh`. The remote shell reported an unmatched `for`; the command was interrupted before any storage inspection completed. No files or app data were changed.
+
+The owner reports approximately 20 GB attributed to apps, 2.2 GB to images, a few hundred MB each for videos and downloads, and 7.9 GB for system. These are preliminary Settings-category estimates, not a verified filesystem breakdown. They may be rounded or classify app data/cache differently.
+
+The target is at least 20 GB free, but feasibility cannot be determined until the usable `/data` capacity and current free space are measured. System storage is not a deletion target. The next pass will inspect data-partition capacity, shared-storage directory sizes, Android diskstats, and installed third-party packages. App-private sizes will be checked through Android Settings rather than assumed from inaccessible paths.
+
+A separate storage guide now tracks the storage baseline, safe cleanup order, and rollback/safety rules: [Android storage optimization](storage-optimization.md).
+
+**Safety decision:** No bulk deletion, app-data clearing, system-file removal, or cache cleanup has been performed.
