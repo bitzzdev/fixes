@@ -331,7 +331,7 @@ The next phase remains read-only until each subsystem is understood. The immedia
 |---|---|---|
 | 0 | Device and access baseline | Complete |
 | 1 | Kernel and OS inventory | Complete; 30 Oct 2026 |
-| 2 | Kernel configuration, memory pressure, zRAM/swap | Pending |
+| 2 | Kernel configuration, memory pressure, zRAM/swap | In progress; read-only diagnostics prepared |
 | 3 | CPU scheduler and cpufreq behavior | Pending |
 | 4 | Storage I/O scheduler and latency | Pending |
 | 5 | Thermal behavior under a repeatable workload | Pending |
@@ -340,3 +340,16 @@ The next phase remains read-only until each subsystem is understood. The immedia
 | 8 | Before/after validation and rollback review | Pending |
 
 **Constraint:** The phone is not rooted. ADB shell access does not grant permission to modify protected kernel interfaces. Do not attempt writes to protected `/sys`, `/proc`, or vendor nodes, and do not recommend root-only tuning as if it were available. Building or flashing a custom kernel would be a separate, higher-risk project requiring verified device-specific source, configuration, toolchain, boot image details, and a recovery path.
+
+
+### Stage 2 preparation: memory and zRAM read-only checks
+
+The next diagnostic pass is designed to distinguish configuration from live behavior:
+
+- Pull the readable kernel config to the Linux host and inspect only relevant swap, zRAM, zsmalloc, memory-management, reclaim, and low-memory-killer options.
+- Capture `/proc/meminfo` and selected `/proc/vmstat` counters twice, ten seconds apart. Counter deltas such as page scanning, page stealing, and swap I/O are more informative than a single low `MemFree` value.
+- Inspect zRAM sysfs permissions and readable attributes without attempting writes.
+- Capture Android's `dumpsys meminfo` summary as a framework-level cross-check.
+- Re-check `/proc/swaps`; if it remains denied, record that limitation rather than inferring swap state.
+
+No changes are authorized by this diagnostic stage. In particular, do not change `swappiness`, zRAM size/algorithm, LMK settings, or storage queue parameters based on configuration flags alone.
