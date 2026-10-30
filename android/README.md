@@ -1,12 +1,12 @@
 # Android Fixes
 
-Device-specific diagnostics, Android app troubleshooting, ADB procedures, storage cleanup, battery and performance investigations.
+Android device diagnostics, ADB workflows, app troubleshooting, storage cleanup, battery and performance investigations, and Android-adjacent tooling.
 
-## Guides
+## Device optimization
 
 - [Realme C11 RMX3231 performance and battery optimization](realme-c11-rmx3231-optimization.md)
 - [Android storage optimization](storage-optimization.md)
 
-## Method
+## Termux
 
-Use read-only diagnostics first, preserve user data, and document every change with a verification and rollback path.
+- [Claude Code CLI workaround on Termux](termux/claude-code-cli-workaround.md)
