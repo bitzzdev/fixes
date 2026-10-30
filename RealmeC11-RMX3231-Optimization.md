@@ -602,3 +602,16 @@ This confirms that process reclamation continued during the normal-use test. The
 6. No LMKD, rampolicy, zRAM, swap, or VM settings were changed.
 
 **Next action:** Identify which apps were deliberately used during the 90-second test and whether they reloaded when revisited. Then collect a clean short sample that explicitly prints `/proc/vmstat` before and after, alongside MemAvailable, SwapFree, AnonPages, and recent kill events. Do not disable rampolicy or weaken LMKD based on these observations alone.
+
+
+### Stage 2 user-visible impact check
+
+**Date:** 30 October 2026  
+**User-reported workload:** Switched between WhatsApp, Instagram, and YouTube during the 90-second normal-use test.  
+**Observed user-visible result:** None of these three apps reloaded when revisited.
+
+This is an important distinction: although LMKD and vendor `rampolicy` killed other cached/background processes during the interval, the three apps the user actively switched between remained available without a visible reload. The test therefore confirms background process reclamation, but does not demonstrate that the observed kills disrupted this particular multitasking workload.
+
+The result does not prove that all app switching is unaffected or that memory pressure never causes reloads. It does mean that changing LMKD or vendor memory policy is not justified by the current user-visible evidence. Keep the stock memory-management policy unchanged.
+
+**Stage 2 practical conclusion:** Memory reclamation is observable, but no adverse effect was reported in the tested WhatsApp/Instagram/YouTube switching sequence. The unresolved SwapFree/AnonPages discrepancy and lack of timed VM counter output remain diagnostic limitations. No memory-related settings were changed.
