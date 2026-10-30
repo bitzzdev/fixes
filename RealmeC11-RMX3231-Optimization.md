@@ -615,3 +615,58 @@ This is an important distinction: although LMKD and vendor `rampolicy` killed ot
 The result does not prove that all app switching is unaffected or that memory pressure never causes reloads. It does mean that changing LMKD or vendor memory policy is not justified by the current user-visible evidence. Keep the stock memory-management policy unchanged.
 
 **Stage 2 practical conclusion:** Memory reclamation is observable, but no adverse effect was reported in the tested WhatsApp/Instagram/YouTube switching sequence. The unresolved SwapFree/AnonPages discrepancy and lack of timed VM counter output remain diagnostic limitations. No memory-related settings were changed.
+
+
+### Stage 3: CPU scheduler and cpufreq baseline
+
+**Date:** 30 October 2026  
+**Method:** Read-only CPU policy, time-in-state, cpuidle, and two `/proc/stat` snapshots 15 seconds apart. Phone screen remained on and the device was left idle.
+
+#### CPU policies
+
+| Policy | CPUs | Governor | Minimum | Maximum | Reported current at both ends |
+|---|---|---|---:|---:|---:|
+| policy0 | 0–3 | schedutil | 768 MHz | 1.2 GHz | 768 MHz |
+| policy4 | 4–7 | schedutil | 768 MHz | 1.6 GHz | 1.6 GHz |
+
+The big-cluster policy reported 1.6 GHz at both the beginning and end of the 15-second sample, even though the aggregate CPU utilization was low. A `scaling_cur_freq` read is only a point-in-time driver-reported value and may not represent the actual frequency throughout the interval. This needs a repeated time-in-state delta before concluding that the big cluster is staying at maximum frequency.
+
+The cumulative `time_in_state` files show that both policies have spent substantial accumulated time at their lowest and highest listed frequencies. They are lifetime/cumulative counters in this capture, not a measurement of the 15-second interval, so they cannot establish current scaling behavior by themselves.
+
+#### CPU utilization from /proc/stat
+
+Across the 15-second interval, the aggregate CPU counters changed by approximately:
+
+| Counter category | Tick delta |
+|---|---:|
+| User | +227 |
+| Nice | +30 |
+| System | +327 |
+| Idle | +11,211 |
+| I/O wait | +4 |
+| IRQ | +79 |
+| SoftIRQ | +20 |
+| Total | +11,898 |
+
+This corresponds to approximately **5.7% busy time and 94.3% idle time** across the eight logical CPUs for this short idle-screen sample. There was one runnable task and zero blocked tasks at the follow-up. This is not evidence of sustained CPU saturation.
+
+Per-core activity was uneven, with more work on CPU0 and CPU4 than on the other cores. That is compatible with normal scheduling and does not, on its own, indicate a scheduler fault.
+
+#### CPU idle states
+
+All eight CPUs exposed two enabled idle states:
+
+- `WFI` (ARM Wait For Interrupt)
+- `core_pd`
+
+The usage and residency values returned by sysfs are cumulative counters. They confirm that the platform exposes core idle states, but a single cumulative snapshot cannot show the residency distribution during this particular 15-second test. No idle state was disabled.
+
+#### Stage 3 preliminary conclusion
+
+1. `schedutil` is active on both CPU clusters.
+2. Aggregate CPU activity was low during the 15-second idle sample, at approximately 5.7% busy.
+3. The big cluster's reported current frequency remained at 1.6 GHz in the two endpoint reads despite low aggregate utilization. This is an observation to validate, not proof of sustained maximum-frequency operation.
+4. Cumulative frequency and idle-state counters need interval deltas to show actual behavior during a controlled sample.
+5. No scheduler, governor, CPU frequency, or idle-state settings were changed.
+
+**Next diagnostic:** Take two short-interval snapshots of each policy's `time_in_state`, each CPU's `cpuidle/state*/time`, and the reported current frequency. Compare counter deltas rather than relying on a single frequency read. Keep the device screen on and otherwise idle. Do not force a frequency or change governors.
