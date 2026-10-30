@@ -248,4 +248,95 @@ Instagram's two background AppOps restrictions remain active. Its process was su
 
 Gmail's high CPU reading was temporary. No persistent CPU overload, memory thrashing, or wake-lock problem has been established.
 
-**Next priority:** Determine whether Instagram restarts during a longer idle period and, if so, identify what triggers it.
+**Next priority:** Inspect the kernel configuration and obtain readable memory/zRAM and storage diagnostics before proposing any OS-level changes.
+
+
+## 10. OS and kernel investigation
+
+**Started:** 30 October 2026  
+**Access level:** ADB shell, non-root  
+**Stage 1:** Read-only kernel and OS inventory
+
+### Kernel and Android build
+
+| Item | Observed value |
+|---|---|
+| Kernel | Linux 4.14.193+-ab478 |
+| Kernel build | #1 SMP PREEMPT, Thu May 9 16:42:40 CST 2024 |
+| Architecture reported by kernel | armv8l |
+| Android release | 11 |
+| Android SDK | 30 |
+| Build fingerprint | `realme/RMX3231/RMX3231:11/RP1A.201005.001/1709693423112:user/release-keys` |
+| Board / hardware property | RMX3231 |
+| Kernel configuration | `/proc/config.gz` exists and is readable |
+
+The kernel is a vendor build based on Linux 4.14.193. The available configuration archive is a useful next source of evidence, but its options have not yet been inspected. The reported `armv8l` value is the kernel's architecture string and does not change the previously observed ARM Cortex-A55 CPU inventory.
+
+### CPU frequency scaling
+
+Both CPU policies report the `schedutil` governor. Available governors are `userspace`, `powersave`, `performance`, and `schedutil`.
+
+| Policy | CPU cluster | Minimum | Maximum | Current at inventory |
+|---|---|---:|---:|---:|
+| policy0 | CPUs 0–3 | 768 MHz | 1.2 GHz | 768 MHz |
+| policy4 | CPUs 4–7 | 768 MHz | 1.6 GHz | 1.6 GHz |
+
+These current-frequency values are single snapshots, not evidence of a sustained frequency state or a performance problem. No governor or frequency changes were made.
+
+### Scheduler, memory, zRAM, and storage interfaces
+
+- The queried `/proc/sys/kernel/sched_*` files returned no values.
+- The queried debug scheduler directory returned no listing.
+- `/proc/swaps` returned **Permission denied** to the ADB shell.
+- `/sys/block/zram0` exists, but the requested zRAM attributes did not return readable values.
+- The queried VM sysctl files and low-memory-killer parameter returned no values.
+- The queried block queue scheduler and read-ahead attributes returned no values for the listed MMC devices.
+
+These results mean the current ADB-shell inventory could not establish the active swap configuration, zRAM compression algorithm or statistics, VM tunables, or storage scheduler. They must not be interpreted as proof that those kernel facilities are disabled.
+
+### Thermal subsystem
+
+Android Thermal HAL 2.0 is connected and reports **Thermal Status 0** (no thermal severity reported at the time of capture).
+
+Temperatures from the captured inventory:
+
+| Sensor | Cached value | HAL current value |
+|---|---:|---:|
+| CPU | 49.52°C | 42.272°C |
+| GPU | 45.197°C | 40.682°C |
+| Board | 42.167°C | 38.494°C |
+
+A cooling device named `test cooling device` reported value 100. Its meaning and scale are not established by this snapshot, so it is not being treated as proof of active throttling. Temperature readings are point-in-time observations.
+
+### Kernel modules
+
+The module inventory includes vendor graphics/display components (`pvrsrvkm`, `sprd_dpu`, `dpu_*`), Unisoc/Spreadtrum camera, sensor, Wi-Fi and Bluetooth components, plus Android kernel facilities such as Binder, ashmem-related components, dm-verity, FUSE, and zRAM-related block infrastructure.
+
+The presence of a module does not establish that it is currently loaded and active in a performance-critical path, nor that changing it would improve performance.
+
+### Stage 1 conclusions
+
+1. This is a vendor Linux 4.14.193 PREEMPT kernel on Android 11, not a modern upstream kernel.
+2. CPU frequency scaling is already using `schedutil`; there is no evidence supporting a governor change.
+3. The big CPU policy reached its reported 1.6 GHz maximum in one sample. This is not a reason to lock it at that frequency.
+4. Thermal HAL reports status 0. No thermal throttling has been established.
+5. zRAM, swap, VM and storage scheduler details remain unresolved because the relevant interfaces were unavailable or unreadable to the shell.
+6. No OS, kernel, scheduler, memory, storage, thermal, or graphics settings were changed during this stage.
+
+## 11. OS/kernel optimization plan
+
+The next phase remains read-only until each subsystem is understood. The immediate priority is to inspect the readable kernel configuration and obtain better evidence about memory/swap and storage behavior. Any later tuning must have a measurable baseline, a reversible change, and an after-test.
+
+| Stage | Investigation | Status |
+|---|---|---|
+| 0 | Device and access baseline | Complete |
+| 1 | Kernel and OS inventory | Complete; 30 Oct 2026 |
+| 2 | Kernel configuration, memory pressure, zRAM/swap | Pending |
+| 3 | CPU scheduler and cpufreq behavior | Pending |
+| 4 | Storage I/O scheduler and latency | Pending |
+| 5 | Thermal behavior under a repeatable workload | Pending |
+| 6 | Display/compositor frame pacing | Pending |
+| 7 | Android framework settings and reversible tuning | Pending |
+| 8 | Before/after validation and rollback review | Pending |
+
+**Constraint:** The phone is not rooted. ADB shell access does not grant permission to modify protected kernel interfaces. Do not attempt writes to protected `/sys`, `/proc`, or vendor nodes, and do not recommend root-only tuning as if it were available. Building or flashing a custom kernel would be a separate, higher-risk project requiring verified device-specific source, configuration, toolchain, boot image details, and a recovery path.
