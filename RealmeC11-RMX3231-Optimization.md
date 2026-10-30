@@ -478,3 +478,85 @@ The available-memory reduction was about 17.3 MiB, and SwapFree fell about 13.9 
 The reclaim and allocation-stall counters continued increasing rapidly. The `oom_kill` counter rose by nine, but the queried logcat buffers contained no matching `lmkd` or `lowmemorykiller` messages, and the queried kernel log search returned no OOM/killed-process messages. The Binder service-list query returned no service name matching LMK or memory.
 
 **Interpretation:** This is a repeatable counter anomaly that warrants checking process-exit records and the actual lmkd process. The counters alone do not identify which process was killed or establish user-visible memory pressure. No changes were made.
+
+
+### Stage 2 follow-up: LMKD and process-kill evidence
+
+**Date:** 30 October 2026  
+**Method:** Read-only inspection of the lmkd process, low-memory properties, Android event log, ActivityManager exit history, and VM counters.
+
+#### LMKD status and configuration
+
+The low-memory-killer daemon is running:
+
+- PID: `323`
+- Process: `lmkd`
+- Init service state: `running`
+
+Relevant properties reported by the device:
+
+| Property | Value |
+|---|---:|
+| `ro.lmk.critical` | 201 |
+| `ro.lmk.critical_upgrade` | true |
+| `ro.lmk.downgrade_pressure` | 60 |
+| `ro.lmk.kill_heaviest_task` | false |
+| `ro.lmk.low` | 1001 |
+| `ro.lmk.medium` | 700 |
+| `ro.lmk.psi_complete_stall_ms` | 400 |
+| `ro.lmk.swap_free_low_percentage` | 20 |
+| `ro.lmk.upgrade_pressure` | 30 |
+| `ro.lmk.use_minfree_levels` | false |
+| `persist.sys.zram_enabled` | 1 |
+| `persist.sys.lmk.reportkills` | true |
+
+The properties document the vendor's configured LMKD policy. Their presence does not by itself indicate that the thresholds are currently being crossed. No property was changed.
+
+#### Actual process-kill evidence
+
+Unlike the earlier log query, this event-log capture contains direct LMKD `killinfo` records followed by matching ActivityManager process-death records.
+
+At approximately **12:01:33**, LMKD emitted killinfo records for processes whose subsequent `am_proc_died` entries included:
+
+- `com.google.process.gservices`
+- `com.google.process.gapps`
+- `com.facebook.services`
+- `com.github.android`
+- `com.android.vending:background`
+- `com.instagram.android`
+
+At approximately **12:02:52**, another group of LMKD killinfo records was followed by process-death entries for Brave browser and its Chromium child processes.
+
+This is evidence that LMKD did kill cached/background processes during the captured period. It also confirms that the earlier increase in the `oom_kill` counter should not be dismissed as merely a display anomaly. The logs do not, by themselves, establish that the user experienced visible lag or that every process death was caused by the same memory-pressure episode.
+
+The event log also contains separate ActivityManager `am_kill` entries with reasons such as `empty #4`, `empty #5`, and `remove task`. These are distinct framework kill records; they should not all be attributed to LMKD.
+
+#### ActivityManager exit history
+
+`dumpsys activity exit-info` is supported on this Android build and returned historical process-exit records. The captured first 120 lines showed older records for `com.google.android.apps.restore`, including an older `LOW_MEMORY` exit on 21 October. The output was truncated before a complete recent-exit review, so it does not provide a complete per-package explanation for the 30 October LMKD events.
+
+#### VM counter snapshot
+
+At the end of this diagnostic, the counters were:
+
+| Counter | Value |
+|---|---:|
+| `pswpin` | 12,800 |
+| `pswpout` | 1,024 |
+| `allocstall_normal` | 1,726,622,055 |
+| `pgsteal_direct` | 228,457,577 |
+| `pgscan_direct` | 796,886,580 |
+| `pgscan_direct_throttle` | 456,163,318 |
+| `oom_kill` | 335,261 |
+
+These are cumulative counters, not rates. Their absolute magnitudes cannot be used to infer current pressure without a fresh timed delta. Earlier short samples showed rapid counter increases while MemAvailable remained roughly 628–653 MB and swap I/O counters stayed unchanged. The new killinfo records now establish that some LMKD kills did occur, but a controlled before/after workload is still needed to quantify how often this happens and whether it affects responsiveness.
+
+#### Stage 2 interpretation and decision
+
+1. LMKD is active and has reported actual process kills, including Instagram, Google background processes, GitHub, Facebook services, Play Store background, and Brave processes in the captured event window.
+2. Android also independently killed some cached/empty or task-removed processes; those framework events should not be conflated with LMKD kills.
+3. The available exit-info excerpt is incomplete and does not fully explain the latest kill batch.
+4. The current evidence confirms background process reclamation, but does not yet prove harmful user-visible memory thrashing. MemAvailable, timed VM counter deltas, swap I/O, and user-visible app reloads must be correlated.
+5. No LMKD properties, zRAM settings, swap settings, VM tunables, or kernel parameters were modified.
+
+**Next action:** Complete a short controlled memory-pressure check with a fresh baseline, then a timed follow-up while performing a consistent everyday workload. Record MemAvailable, SwapFree, `pswpin`/`pswpout`, reclaim/allocstall deltas, and whether recently used apps are unexpectedly killed or need to reload. Do not weaken LMKD or change zRAM policy to keep more apps resident; that could make a 2 GB device less stable.
